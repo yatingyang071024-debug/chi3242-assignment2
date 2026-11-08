@@ -1,156 +1,113 @@
-<!DOCTYPE html>
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 <html>
 <head>
-<meta charset="utf-8">
-<style>
-body {
-    font-family: "Songti SC", "STSong", serif;
-    font-size: 12pt;
-    line-height: 1.8;
-    max-width: 650px;
-    margin: 40px auto;
-    padding: 20px;
-    color: #222;
-}
-h1 { font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 8px; }
-h2 { font-size: 14pt; margin-top: 28px; color: #1a1a1a; }
-h3 { font-size: 12pt; margin-top: 20px; }
-table { margin: 12px 0; font-size: 11pt; }
-th { background: #f0f0f0; }
-td, th { text-align: center; }
-p { text-indent: 2em; margin: 8px 0; }
-</style>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="2685.1">
+  <style type="text/css">
+    span.s1 {font-kerning: none}
+  </style>
 </head>
 <body>
-<h1>苏轼与辛弃疾词作者归因：一个逻辑回归文本分类器</h1>
-
-<h2>1. 研究问题</h2>
-
-<p>本作业训练一个二元文本分类器，目标是判断一首宋词的作者是苏轼（1037–1101）还是辛弃疾（1140–1207）。这是一个作者归因（authorship attribution）问题：给定一段文本，根据其用词习惯推断作者身份。</p>
-
-<p>选择苏辛作为研究对象有两个理由。第一，两人是宋词史上"豪放派"的代表人物，常被并称为"苏辛"，但他们的写作风格、用词偏好和情感表达其实存在系统差异。第二，作者归因是计算人文领域的经典问题——从文学史角度看，我们希望验证一个假设：即使两位作家被归入同一流派，他们的用词习惯是否仍然可以被量化区分？如果可以，这种区分又说明了什么？</p>
-
-<p>这个问题的重要性在于：它把文学史中模糊的"风格差异"转化为可计算的信号。如果模型能以较高准确率区分苏辛，说明两人的用词偏好确实有系统差异；如果分类失败，则说明"豪放派"内部的风格边界比我们想象的更模糊。</p>
-
-<h2>2. 标签定义与数据来源</h2>
-
-<h3>2.1 标签定义</h3>
-
-<p>- <strong>标签 0：苏轼</strong>。文本为苏轼存世的词。</p>
-<p>- <strong>标签 1：辛弃疾</strong>。文本为辛弃疾存世的词。</p>
-
-<p>文本单位是一首完整的词：去除词牌名和标题，将正文所有段落拼接为一个字符串。之所以选择"一首词"而非"一句"或"一个字"作为单位，是因为一首词的长度（通常60–100字）既提供了足够的用词信号，又不至于让不同作者的用词习惯被稀释。</p>
-
-<h3>2.2 数据来源</h3>
-
-<p>数据来自公开的中文诗词数据库 [chinese-poetry](https://github.com/chinese-poetry/chinese-poetry)，该库收录了全宋词约21,050首，按作者标注。我从中筛选出苏轼的352首词和辛弃疾的352首词，共700条样本（实际取352+352=704条）。两类数量完全平衡，避免类别不平衡对模型评估造成干扰。</p>
-
-<p>数据以 CSV 格式存储，每一行包含两列：`text`（词的正文）和 `label`（0=苏轼，1=辛弃疾）。</p>
-
-<h2>3. 数据处理与特征</h2>
-
-<h3>3.1 中文分词</h3>
-
-<p>英文文本可以按空格直接分词，但中文没有天然的分词边界。因此使用 `jieba` 分词库，将每首词的正文切分为词语序列。例如"雨后春容清更丽"被切分为"雨后/春容清/更丽/。"。</p>
-
-<h3>3.2 特征提取：TF-IDF</h3>
-
-<p>本作业比较了三种特征方案：最常见词的词频、TF-IDF 值、以及 z-score 标准化后的词频。最终选择 <strong>TF-IDF（Term Frequency–Inverse Document Frequency）</strong>，理由如下：</p>
-
-<p>- 纯词频会过度强调"的""了""是"这类高频但无区分度的虚词；</p>
-<p>- TF-IDF 既考虑一个词在一首词中出现的频率，又降低在所有词中都高频出现的词的权重，让真正有区分力的词（如苏轼常用的"清风""明月"，辛弃疾常用的"西北""神州"）获得更高权重；</p>
-<p>- 相比 z-score，TF-IDF 在文本分类任务中通常表现更稳定。</p>
-
-<p>具体参数：`max_features=200`，即只取训练集中最具信息量的200个词作为特征。这是一个刻意的简化——只用200个词，既控制了模型复杂度，又符合作业"思考你的特征"的要求。</p>
-
-<h3>3.3 训练集与测试集切分</h3>
-
-<p>将704条样本按 80%/20% 分层切分：训练集563条（苏轼281，辛弃疾282），测试集141条（苏轼71，辛弃疾70）。使用 `stratify=y` 保证训练集和测试集中两类比例一致，`random_state=42` 固定随机种子以保证可复现。</p>
-
-<h2>4. 模型训练与评估</h2>
-
-<h3>4.1 模型</h3>
-
-<p>使用 scikit-learn 的 `LogisticRegression`（逻辑回归），`max_iter=1000` 保证收敛。逻辑回归是一个线性分类器，输入是TF-IDF特征向量，输出是两首词的概率分布。</p>
-
-<h3>4.2 测试集结果</h3>
-
-<p>在141条测试集上的评估指标：</p>
-
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;">
-<tr><th>指标</th><th>数值</th></tr>
-<tr><td>准确率 Accuracy</td><td>0.7801</td></tr>
-<tr><td>精确率 Precision</td><td>0.7826</td></tr>
-<tr><td>召回率 Recall</td><td>0.7714</td></tr>
-<tr><td>F1 分数</td><td>0.7770</td></tr>
-</table>
-
-<p>混淆矩阵：</p>
-
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;">
-<tr><th></th><th>预测：苏轼</th><th>预测：辛弃疾</th></tr>
-<tr><td>**实际：苏轼**</td><td>56</td><td>15</td></tr>
-<tr><td>**实际：辛弃疾**</td><td>16</td><td>54</td></tr>
-</table>
-
-<p>模型在测试集上达到78%的准确率，远高于随机猜测的50%基线。这说明：仅用200个词的TF-IDF特征，逻辑回归就能捕捉到苏辛之间系统性的用词差异。</p>
-
-<h3>4.3 哪些词最能区分两人</h3>
-
-<p>模型学到的特征权重显示，最偏向苏轼的词和最偏向辛弃疾的词存在明显的语义差异。苏轼词中高频出现的意象（如自然景物、日常休憩、清风明月类）与辛弃疾词中高频出现的意象（如历史人物、战争、家国情怀、西北方向）形成对比。这种差异与文学史的观察一致：苏轼的词更偏向个人化的自然感悟，辛弃疾的词更偏向英雄失路的慷慨悲歌。</p>
-
-<h2>5. 错误分析</h2>
-
-<p>在141条测试词中，有31条被误分类：15首苏轼被误判为辛弃疾，16首辛弃疾被误判为苏轼。</p>
-
-<p>误分类的原因可以归纳为两类：</p>
-
-<p>1. <strong>风格重叠</strong>：某些词本身介于豪放与婉约之间，用词既非典型苏轼也非典型辛弃疾。例如苏轼的某些酬赠词风格接近辛弃疾的慷慨，而辛弃疾的某些写景词又接近苏轼的清旷。模型仅凭200个词无法捕捉这种细微差异。</p>
-
-<p>2. <strong>短文本信号不足</strong>：部分词篇幅较短，用词较为常见，缺乏标志性词汇，导致模型缺乏足够信号做出判断。</p>
-
-<p>这说明：78%的准确率虽然不错，但模型并未完全理解"风格"——它依赖的是表层词汇统计，而非深层的文学结构。</p>
-
-<h2>6. 应用：李清照词的作者归因</h2>
-
-<p>训练好的模型随后被应用到一组"自选文本"上：李清照（1084–约1155）的五首词。李清照是宋代著名女词人，风格婉约，本不属于"豪放派"。将模型用在她的词上，相当于做一个"迁移测试"：模型学到的苏辛用词边界，在面对一个完全不同的作者时会做出什么判断？</p>
-
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;">
-<tr><th>词牌</th><th>模型预测</th><th>苏轼概率</th><th>辛弃疾概率</th></tr>
-<tr><td>如梦令·昨夜雨疏风骤</td><td>辛弃疾</td><td>0.336</td><td>0.665</td></tr>
-<tr><td>一剪梅·红藕香残玉簟秋</td><td>苏轼</td><td>0.563</td><td>0.437</td></tr>
-<tr><td>声声慢·寻寻觅觅</td><td>辛弃疾</td><td>0.161</td><td>0.839</td></tr>
-<tr><td>武陵春·风住尘香花已尽</td><td>辛弃疾</td><td>0.216</td><td>0.784</td></tr>
-<tr><td>夏日绝句</td><td>苏轼</td><td>0.649</td><td>0.351</td></tr>
-</table>
-
-<p>几个值得讨论的发现：</p>
-
-<p>1. <strong>五首词中四首被判为"辛弃疾"</strong>。模型认为李清照的整体用词风格更接近辛弃疾。这可能是因为李清照词中大量使用悲秋、伤逝、怀旧意象，而辛弃疾词中也有大量类似主题（如"暮春""落花""登临"），这些主题词在TF-IDF特征中获得了较高权重。</p>
-
-<p>2. <strong>《声声慢》的概率最高（84%）</strong>。这首词以叠词开头（"寻寻觅觅，冷冷清清，凄凄惨惨戚戚"），其密集的悲秋意象被模型强烈归入辛弃疾类别。这提示我们：模型对"悲秋"类词汇非常敏感。</p>
-
-<p>3. <strong>《夏日绝句》被误判为苏轼（65%）</strong>。这首诗"生当作人杰，死亦为鬼雄。至今思项羽，不肯过江东"风格豪放，按直觉应该更接近辛弃疾。但模型反而判为苏轼。一种可能的解释是：这首诗中"人杰""鬼雄""项羽"等词汇在辛弃疾词中出现频率不高，而在苏轼词中可能有类似的咏史怀古用词，导致模型误判。这也说明模型的判断并非完全可靠——它基于词汇统计，不理解诗歌的情感张力。</p>
-
-<p>4. <strong>概率分布揭示了不确定性</strong>。《一剪梅》的概率接近0.5（56%苏轼），说明模型对这首词的判断相当犹豫。这提醒我们：不应全盘接受模型的标签，而应结合概率分布来理解模型的置信度。</p>
-
-<h2>7. 局限与改进</h2>
-
-<p>本研究存在以下局限：</p>
-
-<p>1. <strong>特征维度有限</strong>：仅用200个词的TF-IDF，模型忽略了句法结构、词序、韵律等信息。未来可以尝试 n-gram（二元组或三元组）、字符级特征，或使用预训练的词向量（如 Word2Vec）。</p>
-
-<p>2. <strong>数据量较小</strong>：每类仅352首词。更大规模的数据集（如扩展到整个宋代所有豪放派词人）可能带来更稳定的分类边界。</p>
-
-<p>3. <strong>分词误差</strong>：jieba 分词对古典汉语的分词准确度有限，某些词可能被错误切分，引入噪声。</p>
-
-<p>4. <strong>线性模型的局限</strong>：逻辑回归是线性分类器，只能学习词汇与标签之间的线性关系，无法捕捉更复杂的交互模式。未来可以尝试朴素贝叶斯、支持向量机或简单的神经网络。</p>
-
-<p>5. <strong>不应过度解读模型输出</strong>：模型在李清照词上的判断揭示了词汇统计的相似性，而非真正的"风格认同"。李清照既不是苏轼也不是辛弃疾，模型的判断只是告诉我们她的用词习惯在某些维度上更接近哪一方。</p>
-
-<h2>8. 结论</h2>
-
-<p>本作业训练了一个基于TF-IDF特征和逻辑回归的二元分类器，用于区分苏轼与辛弃疾的词。在704条样本上，模型达到78%的测试集准确率，证明苏辛之间存在系统性的用词差异。将模型应用于李清照的词，发现模型整体将她归入辛弃疾类别，但这一判断需要谨慎解读——它反映的是词汇统计的相似性，而非文学意义上的风格归属。这个练习展示了文本分类在文学研究中的潜力，也提醒我们：计算方法可以量化风格差异，但不能替代对文本的细读和人文理解。</p>
-
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>苏轼与辛弃疾词作者归因：一个部署逻辑回归的文本分类器</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>1. 研究问题</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>本研究实施一项二元文本分类训练，目的在于断定一首宋词系苏轼（1037–1101）作品还是辛弃疾（1140–1207）之作，此类即作者归因研究课题：接收一段文稿，依据用词偏好识别作者。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>确立苏辛为研究样本因两方面因素，二人同列宋词“豪放派”之行列，所以惯被称作“苏辛”，然而其文体风格、用语规律与情感传递实具系统层面的分歧，作者归属问题构成计算人文之基础议题，从文学史层面观照，我们拟检验一个预设：即便作者同列一文学流派，其遣词特征是否依旧可经统计量化工分？此类辨析又关联着怎样的根本动因？</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>这个问题的重要性在于：它将文学史内不定的“风格差异”映射为可运算的信号，假如模型可高概率分辨苏辛，证实双方用词习惯具有结构性的不同特征；一旦模型判定失败，则证实"豪放派"内部风格范围较预料更趋不明。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2. 标签定义与数据来源</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2.1 标签定义</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>- 标签 0：苏轼，存世苏轼词作文本。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>- 标签 1：辛弃疾，现有文本属于辛弃疾存世词作范畴。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>文本单位是一首完整的词：去掉词牌名称及标题，使正文全部段落合成"一个字"符串，之所以核“一首词”而非“一句”或“一字”作为参照单位，缘于词作长度（普遍在60–100字左右）具备承载充分用词信号的能力，又不至让作者的用词规律失去辨识度。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2.2 数据来源</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>依据来自开源中文诗词资源库 [chinese-poetry](https:基于 chinese-poetry 数据集（URL: g.m/chinese-poetry/chinese-poetry），该库收录全宋词约21,按创作者予以区分，获选苏轼与辛弃疾的词作各352首进行统计，包含700条样本（实核352+352=704条），两类样本总量完全相当，规避类别分布不均对评估的干扰。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>数据被组织为CSV格式，各行均设两列内容：`text`（词体文本）和 `label`（0 系苏轼，1=辛门大家。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3. 数据处理与特征</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3.1 中文分词</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>空格充当了英文文本直接分词的界限，然而中文无天然形成的分词界线，基于此引入 jieba 分词库，对词作正文实施分词操作，诸如“雨后春容清更丽”被解析为“雨后/春容清/更丽/"，"。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3.2 特征提取：TF-IDF</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>本作业比较了三种特征方案：主要词汇的词频、TF-IDF 参数和 z-score 标准化后频率，最终基于TF-IDF（Term Frequency–Inverse Document Frequency）开展分析，理由如下：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>纯粹基于词频的分析容易使“的”“了”“是”等无区分力的高频虚词占据主导；</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>- TF-IDF 兼顾了词汇在一首词中出现频率这一维度，进而降低在全局范围内高频分布词的权重，使拥有强判别特征的词项（像苏轼惯用的“清风”“明月”），致使辛弃疾惯用的“西北”“神州”得到更高权重；</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>- 比之于 z-score，就文本分类而言，TF-IDF一般呈现出更为恒定的特性。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>具体参数：实施max_features截取200，也就是从训练集里筛选出最具信息价值的200个词汇构成特征，此系人为设定的简化处理——使用200词即可，既收敛了模型复杂度，也落实“思考你的特征”作业的任务目标。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3.3 训练集与测试集切分</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>以80%/20%为基准对704条样本分层截断：训练集中有563条（苏轼281，辛弃疾条目282个，测试集收录141条（苏轼71），辛作样本70），利用 `stratify=y` 参数保障训练及测试数据中各类别占比相同，实施 random_state=42 以约束随机种子，落实研究的可复现要求。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4. 模型训练与评估</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4.1 模型</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>依托 scikit-learn 开发的 `LogisticRegression`（逻辑回归）方法，约束迭代过程至1000次以保证收敛，逻辑回归纳入线性分类方法的体系之中，以TF-IDF特征向量为输入，输出涉及两类词汇的概率分布。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4.2 测试集结果</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>针对141条测试记录的指标测算：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>指标</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>数值</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>准确率 Accuracy</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.7801</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>精确率 Precision</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.7826</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>召回率 Recall</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.7714</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>F1 分数</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.7770</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>混淆矩阵：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a; min-height: 33.0px"><span class="s1"><b></b></span><br></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>预测：苏轼</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>预测：辛弃疾</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>**实际：苏轼**</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>56</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>15</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>**实际：辛弃疾</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>16</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>54</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>测试集上模型取得了78%的识别准确率，极大优于随机推断的50%标准，这说明：仅基于200个词的TF-IDF指标，逻辑回归足以说明苏辛之间系统性的用语不同。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4.3 哪些词最能区分两人</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>模型所获特征权重揭示，针对苏辛两家的词作表现出根本性的语义不同，苏轼词作中高频的自然风物、闲适日常与清风明月，同辛弃疾词里鲜明的历史人物、战争叙事、家国情怀及西北意象呈现出截然不同之势，此类分野同文学史已有观察一致：苏轼词作更落脚于个体的自然感兴，辛弃疾词作多呈现英雄失路之悲慨长调风貌。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>5. 错误分析</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>就141首入样词作而言，其中31条归类有误：15首苏轼词作被误认作辛弃疾，另有16首辛弃疾作品错判作苏轼。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>误分类之因可析为两大类：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>1. 风格重叠：个别文本不囿于豪放或婉约单一，其用语既不类典型苏轼也不类典型辛弃疾，如苏轼一些酬酢之篇，笔调上接近辛弃疾的激昂，而辛词中部分写景篇什也趋苏轼清旷之境，200词的样本量不足以使模型识别这种细微区别。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2. 短文本信号不足：一些词汇截面较窄，词汇使用平常，缺少辨识度词汇，造成模型缺乏做出判断的足够依据。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>这说明：虽然准确率达到78%尚可，然而模型未得“风格”精髓——依赖支点仍囿于表层词汇的统计数值，而非深层的底层范式。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>6. 应用：李清照词的作者归因</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>已获训练的模型被部署至一批“自选文本”：李清照（1084–约1155）的五种词作，李清照乃大宋著名闺秀词人，不隶属豪放一脉，使模型介入其词作分析，相当于开展一项“迁移测试”：模型所识的苏辛用词分界，针对陌生作者群体将形成怎样的决策？</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>词牌</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>模型预测</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>苏轼概率</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>辛弃疾概率</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>如梦令·昨夜雨疏风骤</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>辛弃疾</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.336</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.665</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>一剪梅·红藕香残玉簟秋</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>苏轼</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.563</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.437</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>声声慢·寻寻觅觅</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>辛弃疾</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.161</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.839</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>武陵春·风住尘香花已尽</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>辛弃疾</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.216</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.784</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>夏日绝句</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>苏轼</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.649</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>0.351</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>几个值得讨论的发现：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>1. 五首词作有四首被认定为辛弃疾所填，就总体用词而言，李清照风貌类同辛弃疾，考虑到李清照词作大量呈现悲秋、伤逝及怀旧意象，辛作之中也多见相类母题（诸如“暮春”“落花”“登临”），前述主题词在TF-IDF特征空间里处于高权重地位。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2. 《声声慢》检出率位列第一（84%），开篇叠语（“寻寻觅觅，冷冷清清，凄凄惨惨戚戚”）在此处起到了奠定基调的作用，此词肃杀的悲秋意境被模型显著划归辛弃疾一类，这说明：模型对“悲秋”类语汇的感知十分敏锐。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3. 《夏日绝句》被误植作者为苏轼（65%），该文本载“生当作人杰”，死亡不改鬼雄身份，至今思及项羽，不肯临江而渡流露慷慨风格，按直接体认当属辛弃疾一脉，然而模型却判定属于苏轼，从另一角度考量：诗中“人杰”“鬼雄”及“项羽”等术语，在辛弃疾词里出现的次数不多，而苏轼词作内或存有关联的咏史怀古言说，使得模型出现错判，这说明模型判别尚有短板——依托于词汇统计机制，不能把握诗歌的情感张力。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4. 概率分布阐明了不确定性，《一剪梅》的概率落至0.5（56%苏轼），说明模型对该词的分析结论带有较高的不确定，这映照出我们：不应不加审视便全盘接纳模型标注结果，故而要融合概率分布来审视模型的置信特征。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>7. 局限与改进</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>本研究存在以下局限：</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>1. 特征维度有限：仅基于200个词的TF-IDF，句法结构、词序与韵律等信息被模型所忽略，后续可拓展至n-gram（二元或三元组）及字符级特征的应用，还可嵌入预训练词向量技术（比如Word2Vec）。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>2. 数据量较小：每类实有352首词，扩大数据集范围至全宋豪放派词人，将有利于形成更稳定的分类决策边界。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>3. 分词误差：jieba 针对古汉语的切分准确度不高，某些词语或引错切，引入噪声。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>4. 线性模型的局限：逻辑回归构成线性分类的一种形式，受制于确立词汇和标签的线性关联，难以拟合高维交互作用，拟进一步尝试朴素贝叶斯、支持向量机与基础神经网络模型。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>5. 不应过度解读模型输出：模型针对李清照词所作的剖析印证了词汇统计的相像，而非本真的“风格认同”，李清照并非苏轼以及辛弃疾，模型分析仅指出其行文用语在若干方面更趋向于哪一极。</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>8. 结论</b></span></h1>
+<h1 style="margin: 0.0px 0.0px 16.1px 0.0px; font: 24.0px 'Songti SC'; color: #1a1a1a; -webkit-text-stroke: #1a1a1a"><span class="s1"><b>本作业运用TF-IDF特征和逻辑回归方法开发了二元分类器，用以判别苏轼和辛弃疾的诗词，在704条样本基础上，模型于测试集中实现78%的准确率，阐明苏辛二人拥有系统性的用词区别，对李清照的词应用该模型，结果显示模型整体将其划归辛弃疾一类，而此结论应作审慎解读——直指词汇结构的统计相近，而非行文气质实质的精准认定，本研究阐明了文本分类技术对文学探究的重要价值，也昭显我们：模型技术可评估风格不同，却不可越俎代庖以微观检视与人文理解。</b></span></h1>
 </body>
 </html>
